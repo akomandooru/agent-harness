@@ -1,0 +1,132 @@
+[
+  {
+    "id": "WA-REL-01",
+    "pillar": "Reliability",
+    "title": "Asynchronous paths have a dead-letter queue",
+    "severityGuidance": "high",
+    "whatToLookFor": "New SQS queues, Lambda event-source mappings, SNS subscriptions, or Step Functions that lack a DLQ or `onFailure` destination. Without a DLQ, failed messages are silently dropped after retries exhaust.",
+    "references": [
+      "https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/recovery.html"
+    ]
+  },
+  {
+    "id": "WA-REL-02",
+    "pillar": "Reliability",
+    "title": "Retry policy is explicit and idempotent",
+    "severityGuidance": "high",
+    "whatToLookFor": "Lambda handlers or downstream calls that retry on failure without idempotency keys, conditional writes, or de-duplication. SQS `maxReceiveCount` left at the default when the consumer's idempotency story is unclear. SNS subscriptions without a redrive policy.",
+    "references": [
+      "https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/recovery.html"
+    ]
+  },
+  {
+    "id": "WA-REL-03",
+    "pillar": "Reliability",
+    "title": "Timeouts are set explicitly and match the upstream contract",
+    "severityGuidance": "medium",
+    "whatToLookFor": "Lambdas that default to the platform timeout when the upstream caller (API Gateway, Step Functions) has its own shorter limit, downstream HTTP clients without a connect or read timeout, or SQS `visibilityTimeout` shorter than the longest possible processing time of the consuming Lambda.",
+    "references": [
+      "https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/workload-architecture.html"
+    ]
+  },
+  {
+    "id": "WA-REL-04",
+    "pillar": "Reliability",
+    "title": "Throttling and back-pressure protect downstream resources",
+    "severityGuidance": "medium",
+    "whatToLookFor": "Lambdas without `reservedConcurrentExecutions` when they call rate-limited downstream services, API Gateway stages without throttling settings, SNS-to-SQS fan-outs that can swamp the downstream Lambda's concurrency.",
+    "references": [
+      "https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/workload-architecture.html"
+    ]
+  },
+  {
+    "id": "WA-REL-05",
+    "pillar": "Reliability",
+    "title": "Alarms cover the failure modes the change introduces",
+    "severityGuidance": "medium",
+    "whatToLookFor": "New Lambda functions without `Errors` or `Throttles` alarms, new SQS queues without `ApproximateAgeOfOldestMessage` or DLQ-depth alarms, new API Gateway routes without 5XX-rate alarms. A new failure mode without an alarm is invisible.",
+    "references": [
+      "https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/monitor-workload-resources.html"
+    ]
+  },
+  {
+    "id": "WA-REL-06",
+    "pillar": "Reliability",
+    "title": "Recovery is automated where stakes are low and documented where they are high",
+    "severityGuidance": "medium",
+    "whatToLookFor": "Reactive paths (DLQ drain, retry replay, traffic shift) that require manual intervention without a runbook entry, or critical recovery steps that are scripted but not also documented for the on-call. Stateful resources without backup or point-in-time-recovery configured.",
+    "references": [
+      "https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/recovery.html"
+    ]
+  },
+  {
+    "id": "WA-REL-07",
+    "pillar": "Reliability",
+    "title": "Multi-AZ posture matches the resource type and the workload SLO",
+    "severityGuidance": "medium",
+    "whatToLookFor": "Single-AZ deployments of resources that support multi-AZ (RDS, ElastiCache, EFS, NAT gateways) when the SLO documented in AGENTS.md or the runbook calls for higher availability. Lambdas in a VPC pinned to a single subnet.",
+    "references": [
+      "https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/workload-architecture.html"
+    ]
+  },
+  {
+    "id": "WA-REL-08",
+    "pillar": "Reliability",
+    "title": "Circuit-breaker patterns protect against cascading failures",
+    "severityGuidance": "medium",
+    "whatToLookFor": "Long-running synchronous chains where a slow or failing dependency would block all upstream callers, missing circuit-breaker libraries on outbound HTTP from Lambdas that fan out widely, or absence of provisioned concurrency on a critical path that warm-starts under load.",
+    "references": [
+      "https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/workload-architecture.html"
+    ]
+  },
+  {
+    "id": "WA-REL-09",
+    "pillar": "Reliability",
+    "title": "Graceful degradation: the change defines what 'partial' looks like",
+    "severityGuidance": "low",
+    "whatToLookFor": "New features that either fully succeed or fully fail, with no documented partial-success path; downstream lookups whose absence crashes the request when a sensible default would let the path complete; cache misses treated as fatal.",
+    "references": [
+      "https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/workload-architecture.html"
+    ]
+  },
+  {
+    "id": "WA-REL-10",
+    "pillar": "Reliability",
+    "title": "Dependency failures are isolated, not propagated",
+    "severityGuidance": "medium",
+    "whatToLookFor": "A new external dependency (third-party API, peer service, shared SQS queue) introduced without bulkheading, without a fallback path, or without a feature flag that lets operators disable it under load.",
+    "references": [
+      "https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/workload-architecture.html"
+    ]
+  },
+  {
+    "id": "WA-REL-11",
+    "pillar": "Reliability",
+    "title": "Capacity and quotas are checked against the change's growth profile",
+    "severityGuidance": "low",
+    "whatToLookFor": "Lambda concurrency adds that approach the account's concurrent-execution quota, new SQS queues with high throughput that approach the FIFO-throughput limit, or fan-out widths that risk the SNS subscriptions-per-topic limit. A change that works in preview but not at scale.",
+    "references": [
+      "https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/manage-service-quotas-and-constraints.html"
+    ]
+  },
+  {
+    "id": "WA-REL-12",
+    "pillar": "Reliability",
+    "title": "Stateful resources have backup or point-in-time recovery configured",
+    "severityGuidance": "medium",
+    "whatToLookFor": "New DynamoDB tables without `pointInTimeRecovery`, RDS instances without automated backups, or S3 buckets holding non-derivable data without versioning. Recoverability should be designed in at creation, not bolted on later.",
+    "references": [
+      "https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/recovery.html"
+    ]
+  },
+  {
+    "id": "WA-REL-13",
+    "pillar": "Reliability",
+    "title": "Change-deployment strategy fits the blast radius",
+    "severityGuidance": "low",
+    "whatToLookFor": "All-at-once Lambda alias updates on critical paths where canary or linear deployments would be safer, lack of pre/post-traffic hooks on a function whose failure would be hard to detect immediately, or stack-level changes that recreate stateful resources.",
+    "references": [
+      "https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/change-management.html"
+    ]
+  }
+]

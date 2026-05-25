@@ -1,0 +1,12 @@
+{
+  "name": "reviewer-agent",
+  "model": "${models.reviewer}",
+  "systemPrompt": { "$ref": "../../agents/reviewer/system.md" },
+  "tools": [
+    "module.readFile",
+    "module.diff",
+    "reference.checklist"
+  ],
+  "memory": { "type": "session" },
+  "iterationCap": "${limits.iterationCap}"
+}

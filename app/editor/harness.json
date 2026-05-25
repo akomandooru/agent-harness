@@ -1,0 +1,24 @@
+{
+  "name": "editor-agent",
+  "model": "${models.editor from agent-harness.config.json}",
+  "systemPrompt": { "$ref": "../../agents/editor/system.md" },
+  "tools": [
+    "module.readFile",
+    "module.writeFile",
+    "module.listFiles",
+    "module.diff",
+    "cdk.diff",
+    "cdk.deploy",
+    "sensor.cdkNag",
+    "sensor.tsc",
+    "sensor.eslint",
+    "sensor.unitTests",
+    "preview.cwLogs",
+    "preview.cwMetrics",
+    "reviewer.invoke",
+    "postDeploy.invoke",
+    "pr.open"
+  ],
+  "memory": { "type": "session" },
+  "iterationCap": "${limits.iterationCap from agent-harness.config.json}"
+}

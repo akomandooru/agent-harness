@@ -1,0 +1,39 @@
+{
+  "name": "@agent-harness/scheduled-reviewer",
+  "version": "0.0.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "description": "Scheduled reviewer workflow runner for the fitness-gap loop (Task 2): invokes the reviewer agent on a schedule, writes findings, checks cost guardrail.",
+  "engines": {
+    "node": ">=20.0.0 <21.0.0"
+  },
+  "main": "src/run.ts",
+  "types": "src/run.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json --noEmit",
+    "test": "jest"
+  },
+  "dependencies": {
+    "@agent-harness/harness-shared": "*",
+    "@aws-sdk/client-bedrock-agentcore": "3.1053.0"
+  },
+  "devDependencies": {
+    "@types/jest": "29.5.12",
+    "@types/node": "20.14.10",
+    "aws-sdk-client-mock": "^4.1.0",
+    "jest": "29.7.0",
+    "ts-jest": "29.2.5",
+    "ts-node": "10.9.2",
+    "typescript": "5.5.3"
+  },
+  "jest": {
+    "preset": "ts-jest",
+    "testEnvironment": "node",
+    "testMatch": [
+      "<rootDir>/__tests__/**/*.test.ts"
+    ],
+    "collectCoverageFrom": [
+      "src/**/*.ts"
+    ]
+  }
+}
