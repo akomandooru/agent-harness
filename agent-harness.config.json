@@ -72,6 +72,6 @@
       "_note": "Model identifiers must match the models.editor and models.reviewer fields above."
     },
     "bedrockRegion": "us-east-1",
-    "node": "20.x"
+    "node": "22.x"
   }
 }
