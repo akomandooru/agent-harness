@@ -1,8 +1,8 @@
 name: Scheduled reviewer
 
 on:
-  schedule:
-    - cron: ${{ vars.SCHEDULED_REVIEWER_CRON || '0 6 * * *' }}  # default: 06:00 UTC daily
+  # schedule:
+  #  - cron: ${{ vars.SCHEDULED_REVIEWER_CRON || '0 6 * * *' }}  # default: 06:00 UTC daily
   workflow_dispatch:  # manual trigger for testing
 
 jobs:
