@@ -1,0 +1,33 @@
+# Node
+node_modules/
+dist/
+build/
+*.log
+npm-debug.log*
+.npm/
+.env
+.env.*
+!.env.example
+
+# TypeScript
+*.tsbuildinfo
+
+# CDK
+cdk.out/
+cdk.context.json
+*.d.ts
+!**/types/*.d.ts
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test output
+coverage/
+.nyc_output/
