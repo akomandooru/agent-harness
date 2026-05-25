@@ -1,0 +1,74 @@
+name: Scheduled reviewer
+
+on:
+  schedule:
+    - cron: ${{ vars.SCHEDULED_REVIEWER_CRON || '0 6 * * *' }}  # default: 06:00 UTC daily
+  workflow_dispatch:  # manual trigger for testing
+
+jobs:
+  review:
+    name: Run inferential reviewer against main
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write      # auto-open issues
+      contents: read     # checkout repo
+
+    steps:
+      # ── 1. Checkout ──────────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. Check enabled flag ─────────────────────────────────────────────────
+      # Reads fitnessGapLoop.enabled from agent-harness.config.json.
+      # Exits 0 immediately when the flag is false (kill switch).
+      - name: Check enabled flag
+        id: enabled
+        run: |
+          ENABLED=$(jq -r '.fitnessGapLoop.enabled' agent-harness.config.json)
+          echo "enabled=${ENABLED}" >> "$GITHUB_OUTPUT"
+          if [ "$ENABLED" != "true" ]; then
+            echo "fitnessGapLoop.enabled is false — exiting."
+            exit 0
+          fi
+
+      # ── 3. Invoke reviewer agent ──────────────────────────────────────────────
+      # Calls the reviewer agent as a `bedrock-agentcore:InvokeHarness` call
+      # against the deployed reviewer Managed Harness. The harness's tool
+      # catalogue (module.readFile, module.diff, reference.checklist — read-only)
+      # is enforced by the harness deployment (`app/reviewer/harness.json`);
+      # the orchestrator cannot widen it at invocation time.
+      # `REVIEWER_HARNESS_ARN` is the ARN produced by `agentcore deploy` for
+      # the reviewer harness; the operator stores it as a repo variable so
+      # this workflow (and the orchestrator stack) can read it.
+      # Writes findings to /tmp/reviewer-findings.json on success.
+      - name: Invoke reviewer agent
+        if: steps.enabled.outputs.enabled == 'true'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+          REVIEWER_HARNESS_ARN: ${{ vars.REVIEWER_HARNESS_ARN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node harness/scheduled-reviewer/run.js
+
+      # ── 4. Run auto-open mechanism ────────────────────────────────────────────
+      # Reads /tmp/reviewer-findings.json and opens GitHub issues for findings
+      # at or above the configured severity threshold.
+      # Deduplicates by content signature before opening.
+      - name: Run auto-open mechanism
+        if: steps.enabled.outputs.enabled == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node harness/auto-open/run.js --findings /tmp/reviewer-findings.json
+
+      # ── 5. Emit run record ────────────────────────────────────────────────────
+      # Writes a ScheduledReviewerRunRecord to CloudWatch Logs at
+      # /agent-harness/scheduled-reviewer. Runs with if: always() so the
+      # record is emitted even when a previous step fails.
+      - name: Emit run record
+        if: always()
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+        run: node harness/scheduled-reviewer/emit-run-record.js

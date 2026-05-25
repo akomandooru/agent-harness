@@ -1,0 +1,495 @@
+name: Dispatch agent task
+
+on:
+  issues:
+    types: [labeled]
+
+jobs:
+  dispatch:
+    name: Validate and dispatch to AgentCore
+    runs-on: ubuntu-latest
+    # Only run when the agent-task label is applied
+    if: github.event.label.name == 'agent-task'
+
+    permissions:
+      issues: write      # comment on the issue
+      contents: read     # checkout repo to read config
+      id-token: write    # OIDC token for AWS role assumption (SigV4 signing)
+
+    steps:
+      # ── 1. Checkout ──────────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 1a. Configure AWS credentials (OIDC) ─────────────────────────────────
+      # Assumes the agent-harness-github-runner role via OIDC federation.
+      # The assumed credentials are used by awscurl in step 10 to SigV4-sign
+      # the POST to the orchestrator API Gateway.
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_RUNNER_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION || 'us-east-1' }}
+
+      # ── 1b. Install awscurl ───────────────────────────────────────────────────
+      # awscurl is a small tool that wraps curl with AWS SigV4 request signing.
+      # It reads credentials from the environment (set by the OIDC step above).
+      - name: Install awscurl
+        run: |
+          pip install awscurl --quiet
+
+      # ── 2. Parse issue body ───────────────────────────────────────────────────
+      # GitHub issue forms write each field as a Markdown section:
+      #   ### <Label>\n\n<value>
+      # We extract the three fields by their heading labels.
+      - name: Parse issue body fields
+        id: parse
+        env:
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        run: |
+          # Write the body to a temp file to avoid quoting issues
+          printf '%s' "$ISSUE_BODY" > /tmp/issue_body.txt
+
+          extract_field() {
+            local heading="$1"
+            # Match the heading line, skip the blank line, then collect lines
+            # until the next heading (^###) or end of file.
+            awk -v h="$heading" '
+              found && /^### / { exit }
+              found && NR > skip_until { print }
+              /^### / && index($0, h) > 0 { found=1; skip_until=NR+1 }
+            ' /tmp/issue_body.txt \
+            | sed '/^[[:space:]]*$/d' \
+            | head -c 4096
+          }
+
+          MODULE_PATH="$(extract_field 'Target module path')"
+          CHANGE_DESCRIPTION="$(extract_field 'Change description')"
+          ACCEPTANCE_CRITERIA="$(extract_field 'Acceptance criteria')"
+
+          # Persist to GITHUB_OUTPUT (multiline-safe)
+          {
+            echo "module_path<<EOF_MODULE_PATH"
+            echo "$MODULE_PATH"
+            echo "EOF_MODULE_PATH"
+
+            echo "change_description<<EOF_CHANGE_DESC"
+            echo "$CHANGE_DESCRIPTION"
+            echo "EOF_CHANGE_DESC"
+
+            echo "acceptance_criteria<<EOF_AC"
+            echo "$ACCEPTANCE_CRITERIA"
+            echo "EOF_AC"
+          } >> "$GITHUB_OUTPUT"
+
+      # ── 3. Validate required fields ───────────────────────────────────────────
+      - name: Validate required fields
+        id: validate
+        env:
+          MODULE_PATH: ${{ steps.parse.outputs.module_path }}
+          CHANGE_DESCRIPTION: ${{ steps.parse.outputs.change_description }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          MISSING=()
+
+          if [ -z "$MODULE_PATH" ]; then
+            MISSING+=("**Target module path**")
+          fi
+
+          if [ -z "$CHANGE_DESCRIPTION" ]; then
+            MISSING+=("**Change description**")
+          fi
+
+          if [ ${#MISSING[@]} -gt 0 ]; then
+            MISSING_LIST=$(printf '- %s\n' "${MISSING[@]}")
+            COMMENT="## ❌ Agent task dispatch failed
+
+          The following required fields are missing from the issue body:
+
+          ${MISSING_LIST}
+
+          Please edit the issue to fill in the missing fields, then remove and re-apply the \`agent-task\` label to retry."
+
+            gh api \
+              --method POST \
+              -H "Accept: application/vnd.github+json" \
+              "/repos/${REPO}/issues/${ISSUE_NUMBER}/comments" \
+              -f body="$COMMENT"
+
+            echo "Validation failed: missing fields: ${MISSING[*]}"
+            exit 1
+          fi
+
+          echo "Validation passed."
+
+      # ── 4. Detect trigger type ────────────────────────────────────────────────
+      - name: Detect trigger type
+        id: trigger
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Fetch all labels on this issue
+          LABELS=$(gh api "/repos/${REPO}/issues/${ISSUE_NUMBER}/labels" --jq '[.[].name]')
+          HAS_FITNESS_GAP=$(echo "$LABELS" | jq 'any(. == "triage:fitness-gap")')
+
+          if [ "$HAS_FITNESS_GAP" = "true" ]; then
+            TRIGGER_TYPE="fitness-gap"
+            # Extract the finding signature from the issue body written by step 2
+            FINDING_SIGNATURE=$(grep -oP '(?<=agent-harness:finding-signature:)[a-f0-9]+' /tmp/issue_body.txt || echo "")
+          else
+            TRIGGER_TYPE="feature-change"
+            FINDING_SIGNATURE=""
+          fi
+
+          echo "TRIGGER_TYPE=${TRIGGER_TYPE}"       >> "$GITHUB_ENV"
+          echo "FINDING_SIGNATURE=${FINDING_SIGNATURE}" >> "$GITHUB_ENV"
+          echo "trigger_type=${TRIGGER_TYPE}"       >> "$GITHUB_OUTPUT"
+          echo "finding_signature=${FINDING_SIGNATURE}" >> "$GITHUB_OUTPUT"
+          echo "Trigger type detected: ${TRIGGER_TYPE}"
+
+      # ── 5. Read limits from agent-harness.config.json ─────────────────────────
+      - name: Read limits from config
+        id: config
+        run: |
+          ITERATION_CAP=$(jq -r '.limits.iterationCap' agent-harness.config.json)
+          WALL_CLOCK_CAP=$(jq -r '.limits.wallClockCapMinutes' agent-harness.config.json)
+          TOKEN_SPEND_CAP=$(jq -r '.limits.tokenSpendCapUSD' agent-harness.config.json)
+
+          echo "iteration_cap=${ITERATION_CAP}"     >> "$GITHUB_OUTPUT"
+          echo "wall_clock_cap=${WALL_CLOCK_CAP}"   >> "$GITHUB_OUTPUT"
+          echo "token_spend_cap=${TOKEN_SPEND_CAP}" >> "$GITHUB_OUTPUT"
+
+      # ── 6. Check for an in-flight session ─────────────────────────────────────
+      - name: Check for in-flight session
+        id: concurrency
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Look for the session-id marker comment written by a previous dispatch
+          INFLIGHT=$(gh api \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/${REPO}/issues/${ISSUE_NUMBER}/comments" \
+            --paginate \
+            --jq '[.[] | select(.body | startswith("<!-- agent-harness:session-id:"))] | length')
+
+          if [ "$INFLIGHT" -gt 0 ]; then
+            COMMENT="## ⚠️ Agent task already in flight
+
+          A session is already in flight for this issue. Only one session may run per issue at a time.
+
+          To start a new session, wait for the current session to complete (or apply the \`agent-stop\` label to halt it), then remove and re-apply the \`agent-task\` label."
+
+            gh api \
+              --method POST \
+              -H "Accept: application/vnd.github+json" \
+              "/repos/${REPO}/issues/${ISSUE_NUMBER}/comments" \
+              -f body="$COMMENT"
+
+            echo "Concurrency check failed: session already in flight."
+            exit 1
+          fi
+
+          echo "No in-flight session found. Proceeding."
+
+      # ── 7. Generate session UUID ───────────────────────────────────────────────
+      - name: Generate session ID
+        id: session
+        run: |
+          SESSION_UUID=$(node -e "console.log(require('crypto').randomUUID())")
+          SESSION_ID="session-${SESSION_UUID}"
+          CREATED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          COMMIT_SHA=$(git rev-parse HEAD)
+
+          echo "session_id=${SESSION_ID}"   >> "$GITHUB_OUTPUT"
+          echo "created_at=${CREATED_AT}"   >> "$GITHUB_OUTPUT"
+          echo "commit_sha=${COMMIT_SHA}"   >> "$GITHUB_OUTPUT"
+
+      # ── 8. Mint a short-lived GitHub installation token ───────────────────────
+      - name: Mint GitHub App installation token
+        id: app_token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.GITHUB_APP_ID }}
+          private-key: ${{ secrets.GITHUB_APP_PRIVATE_KEY }}
+          # Scope to this repository only (PR creation)
+          repositories: ${{ github.event.repository.name }}
+
+      # ── 9. Build the trigger payload ──────────────────────────────────────────
+      - name: Build trigger payload
+        id: payload
+        env:
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_URL: ${{ github.event.issue.html_url }}
+          ISSUE_OPENED_BY: ${{ github.event.issue.user.login }}
+          MODULE_PATH: ${{ steps.parse.outputs.module_path }}
+          REPO: ${{ github.repository }}
+          REF: ${{ github.event.repository.default_branch }}
+          COMMIT_SHA: ${{ steps.session.outputs.commit_sha }}
+          SESSION_ID: ${{ steps.session.outputs.session_id }}
+          CREATED_AT: ${{ steps.session.outputs.created_at }}
+          ITERATION_CAP: ${{ steps.config.outputs.iteration_cap }}
+          WALL_CLOCK_CAP: ${{ steps.config.outputs.wall_clock_cap }}
+          TOKEN_SPEND_CAP: ${{ steps.config.outputs.token_spend_cap }}
+          INSTALLATION_TOKEN: ${{ steps.app_token.outputs.token }}
+        run: |
+          # Build the base payload (common to both trigger types)
+          BASE_PAYLOAD=$(jq -n \
+            --argjson issue_number "$ISSUE_NUMBER" \
+            --arg     issue_title   "$ISSUE_TITLE" \
+            --arg     issue_body    "$ISSUE_BODY" \
+            --arg     issue_url     "$ISSUE_URL" \
+            --arg     issue_opened_by "$ISSUE_OPENED_BY" \
+            --arg     module_path   "$MODULE_PATH" \
+            --arg     repository    "$REPO" \
+            --arg     ref           "$REF" \
+            --arg     commit_sha    "$COMMIT_SHA" \
+            --arg     session_id    "$SESSION_ID" \
+            --arg     created_at    "$CREATED_AT" \
+            --argjson iteration_cap    "$ITERATION_CAP" \
+            --argjson wall_clock_cap   "$WALL_CLOCK_CAP" \
+            --argjson token_spend_cap  "$TOKEN_SPEND_CAP" \
+            --arg     installation_token "$INSTALLATION_TOKEN" \
+            --arg     trigger_type  "$TRIGGER_TYPE" \
+            '{
+              schemaVersion: "1.0",
+              triggerType: $trigger_type,
+              issue: {
+                number:   $issue_number,
+                title:    $issue_title,
+                body:     $issue_body,
+                url:      $issue_url,
+                openedBy: $issue_opened_by
+              },
+              module: {
+                path:       $module_path,
+                repository: $repository,
+                ref:        $ref,
+                commitSha:  $commit_sha
+              },
+              session: {
+                id:        $session_id,
+                createdAt: $created_at
+              },
+              limits: {
+                iterationCap:        $iteration_cap,
+                wallClockCapMinutes: $wall_clock_cap,
+                tokenSpendCapUSD:    $token_spend_cap
+              },
+              auth: {
+                githubInstallationToken: $installation_token
+              }
+            }')
+
+          if [ "$TRIGGER_TYPE" = "fitness-gap" ]; then
+            # ── Extract originatingFinding fields from the issue body ──────────
+            # The issue body was written by the auto-open body renderer and has
+            # the following structure (see harness/auto-open/src/body.ts):
+            #
+            #   <!-- agent-harness:finding-signature:<sig> -->
+            #   ## Architecture fitness gap: <id> — <description>
+            #   **Severity:** <severity>
+            #   **Pillar:** <pillar>
+            #   **File:** <file>:<line>          (optional)
+            #   ### Finding
+            #   <description>
+            #   ### Suggested fix
+            #   <suggestedFix>
+            #   ### Reviewer run
+            #   - **Run ID:** <runId>
+            #   - **Date:** <runDate>
+
+            # id: from the h2 heading after "Architecture fitness gap: "
+            FINDING_ID=$(grep -m1 '^## Architecture fitness gap:' /tmp/issue_body.txt \
+              | sed 's/^## Architecture fitness gap: \([^ ]*\) .*/\1/')
+
+            # severity: from "**Severity:** <value>"
+            FINDING_SEVERITY=$(grep -m1 '^\*\*Severity:\*\*' /tmp/issue_body.txt \
+              | sed 's/^\*\*Severity:\*\* *//')
+
+            # pillar: from "**Pillar:** <value>"
+            FINDING_PILLAR=$(grep -m1 '^\*\*Pillar:\*\*' /tmp/issue_body.txt \
+              | sed 's/^\*\*Pillar:\*\* *//')
+
+            # file and line: from "**File:** <path>:<line>" (optional field)
+            FILE_LINE_RAW=$(grep -m1 '^\*\*File:\*\*' /tmp/issue_body.txt \
+              | sed 's/^\*\*File:\*\* *//' || echo "")
+            if [ -n "$FILE_LINE_RAW" ]; then
+              # Split on the last colon to separate file path from line number.
+              # The line number is purely numeric; if the last segment is not a
+              # number, treat the whole string as the file path with no line.
+              LAST_SEGMENT="${FILE_LINE_RAW##*:}"
+              if echo "$LAST_SEGMENT" | grep -qE '^[0-9]+$'; then
+                FINDING_FILE="${FILE_LINE_RAW%:*}"
+                FINDING_LINE="$LAST_SEGMENT"
+              else
+                FINDING_FILE="$FILE_LINE_RAW"
+                FINDING_LINE=""
+              fi
+            else
+              FINDING_FILE=""
+              FINDING_LINE=""
+            fi
+
+            # description: the paragraph under "### Finding" (first non-blank line)
+            FINDING_DESCRIPTION=$(awk '
+              found && /^[[:space:]]*$/ && printed { exit }
+              found && /^[[:space:]]*$/ { next }
+              found && !/^### / { print; printed=1; next }
+              found && /^### / { exit }
+              /^### Finding[[:space:]]*$/ { found=1 }
+            ' /tmp/issue_body.txt | head -c 4096)
+
+            # suggestedFix: the paragraph under "### Suggested fix"
+            FINDING_SUGGESTED_FIX=$(awk '
+              found && /^[[:space:]]*$/ && printed { exit }
+              found && /^[[:space:]]*$/ { next }
+              found && !/^### / { print; printed=1; next }
+              found && /^### / { exit }
+              /^### Suggested fix[[:space:]]*$/ { found=1 }
+            ' /tmp/issue_body.txt | head -c 4096)
+
+            # runId: from "- **Run ID:** <value>"
+            FINDING_RUN_ID=$(grep -m1 '^\- \*\*Run ID:\*\*' /tmp/issue_body.txt \
+              | sed 's/^- \*\*Run ID:\*\* *//')
+
+            # runDate: from "- **Date:** <value>"
+            FINDING_RUN_DATE=$(grep -m1 '^\- \*\*Date:\*\*' /tmp/issue_body.txt \
+              | sed 's/^- \*\*Date:\*\* *//')
+
+            # Build the originatingFinding object, conditionally including
+            # file and line only when present.
+            ORIGINATING_FINDING=$(jq -n \
+              --arg signature    "$FINDING_SIGNATURE" \
+              --arg id           "$FINDING_ID" \
+              --arg pillar       "$FINDING_PILLAR" \
+              --arg severity     "$FINDING_SEVERITY" \
+              --arg description  "$FINDING_DESCRIPTION" \
+              --arg file         "$FINDING_FILE" \
+              --arg line         "$FINDING_LINE" \
+              --arg suggestedFix "$FINDING_SUGGESTED_FIX" \
+              --arg runId        "$FINDING_RUN_ID" \
+              --arg runDate      "$FINDING_RUN_DATE" \
+              '{
+                signature:    $signature,
+                id:           $id,
+                pillar:       $pillar,
+                severity:     $severity,
+                description:  $description,
+                suggestedFix: $suggestedFix,
+                runId:        $runId,
+                runDate:      $runDate
+              }
+              | if $file != "" then . + { file: $file } else . end
+              | if $line != "" then . + { line: ($line | tonumber) } else . end')
+
+            # Merge originatingFinding into the base payload
+            PAYLOAD=$(echo "$BASE_PAYLOAD" \
+              | jq --argjson of "$ORIGINATING_FINDING" '. + { originatingFinding: $of }')
+          else
+            # feature-change: originatingFinding is absent (not null, absent)
+            PAYLOAD="$BASE_PAYLOAD"
+          fi
+
+          # Write payload to a temp file (avoids shell-quoting issues and
+          # prevents the token from appearing in the step log)
+          echo "$PAYLOAD" > /tmp/payload.json
+          echo "Payload built (token redacted from log)."
+
+      # ── 10. POST payload to orchestrator API Gateway ──────────────────────────
+      # SigV4-signs the POST using the agent-harness-github-runner role credentials
+      # assumed via the OIDC step above. The endpoint is read from
+      # agent-harness.config.json orchestrator.apiGatewayEndpoint.
+      # A 403 response means the SigV4 signature is invalid or the runner role
+      # is not authorized for the API Gateway resource ARN — the failure-comment
+      # pattern below surfaces this as a comment on the issue.
+      - name: POST payload to orchestrator API Gateway
+        id: post
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          ORCHESTRATOR_ENDPOINT=$(jq -r '.orchestrator.apiGatewayEndpoint' agent-harness.config.json)
+
+          # awscurl signs the request with SigV4 using the credentials set by
+          # the Configure AWS credentials step (AWS_ACCESS_KEY_ID,
+          # AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN from the OIDC-assumed role).
+          # Capture the response body; non-zero exit means a network or signing error.
+          if ! awscurl \
+            --service execute-api \
+            --region "${AWS_DEFAULT_REGION:-us-east-1}" \
+            -X POST \
+            -H "Content-Type: application/json" \
+            -d @/tmp/payload.json \
+            "$ORCHESTRATOR_ENDPOINT" > /tmp/response.json 2>/tmp/awscurl_stderr.txt; then
+
+            RESPONSE_BODY=$(cat /tmp/response.json 2>/dev/null || cat /tmp/awscurl_stderr.txt 2>/dev/null || echo "(no response body)")
+            COMMENT="## ❌ Agent task dispatch failed
+
+          The orchestrator API Gateway POST failed (awscurl exited non-zero).
+
+          <details>
+          <summary>Response / error output</summary>
+
+          \`\`\`
+          ${RESPONSE_BODY}
+          \`\`\`
+
+          </details>
+
+          Please check the orchestrator API Gateway configuration and the runner role's \`execute-api:Invoke\` permission, then retry by removing and re-applying the \`agent-task\` label."
+
+            gh api \
+              --method POST \
+              -H "Accept: application/vnd.github+json" \
+              "/repos/${REPO}/issues/${ISSUE_NUMBER}/comments" \
+              -f body="$COMMENT"
+
+            echo "Orchestrator API Gateway POST failed."
+            exit 1
+          fi
+
+          echo "Orchestrator API Gateway POST succeeded."
+
+      # ── 11. Comment on the issue with the session marker ──────────────────────
+      - name: Comment session marker on issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+          SESSION_ID: ${{ steps.session.outputs.session_id }}
+          CREATED_AT: ${{ steps.session.outputs.created_at }}
+          MODULE_PATH: ${{ steps.parse.outputs.module_path }}
+        run: |
+          COMMENT="<!-- agent-harness:session-id:${SESSION_ID} -->
+          ## 🤖 Agent task dispatched
+
+          | Field | Value |
+          |---|---|
+          | Session | \`${SESSION_ID}\` |
+          | Module | \`${MODULE_PATH}\` |
+          | Started | ${CREATED_AT} |
+
+          The editing agent has been dispatched. It will open a pull request when it converges, or comment here if it halts early.
+
+          To stop the session, apply the \`agent-stop\` label to this issue."
+
+          gh api \
+            --method POST \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/${REPO}/issues/${ISSUE_NUMBER}/comments" \
+            -f body="$COMMENT"
+
+      # ── Cleanup: remove temp files containing the token ───────────────────────
+      - name: Clean up temp files
+        if: always()
+        run: |
+          rm -f /tmp/payload.json /tmp/response.json /tmp/issue_body.txt

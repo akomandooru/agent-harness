@@ -1,0 +1,111 @@
+name: Preview teardown
+
+# Destroys the CDK preview stack associated with a closed pull request.
+# Fires on PR close regardless of merge status (merged or abandoned).
+#
+# The stack name encodes the session id from the PR body or from the
+# agent-harness/session tag. The workflow reads the session id from the
+# PR body (the editor writes it in the PR description) and destroys the
+# matching stack.
+#
+# Requirements: 7.5, 10.2
+
+on:
+  pull_request:
+    types: [closed]
+
+jobs:
+  teardown:
+    name: Destroy preview stack
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # OIDC token for AWS role assumption
+      contents: read
+      pull-requests: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_EDITOR_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION || 'us-east-1' }}
+
+      - name: Extract session id from PR body
+        id: session
+        uses: actions/github-script@v7
+        with:
+          result-encoding: string
+          script: |
+            const body = context.payload.pull_request.body || '';
+            // The editor writes the session id in the PR body as:
+            //   **Session:** session-<uuid>
+            const match = body.match(/\*\*Session:\*\*\s*(session-[a-f0-9-]+)/i);
+            if (!match) {
+              core.warning('Could not extract session id from PR body. Skipping teardown.');
+              return '';
+            }
+            return match[1];
+
+      - name: Install CDK
+        if: steps.session.outputs.result != ''
+        run: npm install -g aws-cdk@2.1124.1
+
+      - name: Install infrastructure dependencies
+        if: steps.session.outputs.result != ''
+        working-directory: infrastructure
+        run: npm ci
+
+      - name: Destroy preview stack
+        if: steps.session.outputs.result != ''
+        working-directory: modules/fanout
+        env:
+          SESSION_ID: ${{ steps.session.outputs.result }}
+        run: |
+          STACK_NAME="FanoutPreview-${SESSION_ID}"
+          echo "Destroying stack: ${STACK_NAME}"
+          cdk destroy "${STACK_NAME}" \
+            --force \
+            --context "env=preview" \
+            --context "sessionId=${SESSION_ID}" \
+            || echo "Stack ${STACK_NAME} may already be destroyed or does not exist."
+
+      - name: Comment on PR (success)
+        if: steps.session.outputs.result != '' && success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: [
+                '🧹 **Preview environment torn down.**',
+                '',
+                `Stack \`FanoutPreview-${{ steps.session.outputs.result }}\` has been destroyed.`,
+              ].join('\n'),
+            });
+
+      - name: Comment on PR (failure)
+        if: steps.session.outputs.result != '' && failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: [
+                '⚠️ **Preview teardown failed.**',
+                '',
+                `Could not destroy stack \`FanoutPreview-${{ steps.session.outputs.result }}\`.`,
+                'The scheduled sweep will retry. See the runbook (`docs/runbook.md`) for manual teardown steps.',
+              ].join('\n'),
+            });

@@ -1,0 +1,61 @@
+name: Preview sweep
+
+# Scheduled sweep that destroys abandoned preview stacks older than
+# preview.sweepMaxAgeHours (default 24 hours, from agent-harness.config.json).
+#
+# Runs every 6 hours (preview.sweepIntervalHours from config).
+# Also available as a manual trigger for immediate cleanup.
+#
+# Requirements: 7.5, 10.2
+
+on:
+  schedule:
+    # Every 6 hours: matches preview.sweepIntervalHours in agent-harness.config.json
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (list stacks to destroy without destroying them)"
+        required: false
+        default: "false"
+        type: boolean
+
+jobs:
+  sweep:
+    name: Sweep abandoned preview stacks
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # OIDC token for AWS role assumption
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_EDITOR_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION || 'us-east-1' }}
+
+      - name: Install dependencies
+        run: |
+          npm install -g ts-node@10.9.2 typescript@5.5.3
+          npm install --no-save \
+            @aws-sdk/client-cloudformation@3.758.0 \
+            @aws-sdk/client-sts@3.758.0
+
+      - name: Run preview sweep
+        env:
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+        run: |
+          if [ "${DRY_RUN}" = "true" ]; then
+            npx ts-node scripts/sweep-previews.ts --dry-run
+          else
+            npx ts-node scripts/sweep-previews.ts
+          fi
