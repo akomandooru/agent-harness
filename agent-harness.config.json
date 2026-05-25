@@ -34,7 +34,7 @@
     "alternationWindow": 4
   },
   "fitnessGapLoop": {
-    "enabled": true,
+    "enabled": false,
     "schedule": "0 6 * * *",
     "autoOpen": {
       "severityThreshold": "HIGH",
