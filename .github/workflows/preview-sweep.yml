@@ -9,9 +9,9 @@ name: Preview sweep
 # Requirements: 7.5, 10.2
 
 on:
-  schedule:
+  # schedule:
     # Every 6 hours: matches preview.sweepIntervalHours in agent-harness.config.json
-    - cron: "0 */6 * * *"
+    # - cron: "0 */6 * * *"
   workflow_dispatch:
     inputs:
       dry_run:
