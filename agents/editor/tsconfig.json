@@ -1,0 +1,25 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "lib": ["ES2022"],
+    "declaration": true,
+    "inlineSourceMap": true,
+    "inlineSources": true,
+    "rootDir": "..",
+    "outDir": "dist",
+    "typeRoots": ["./node_modules/@types", "../../node_modules/@types"]
+  },
+  "include": [
+    "agent.ts",
+    "managed-harness-invocation.ts",
+    "pr-body.ts",
+    "tools/**/*.ts",
+    "__tests__/**/*.ts",
+    "../reviewer/agent.ts",
+    "../reviewer/tools.ts",
+    "../reviewer/checklists/**/*.ts"
+  ],
+  "exclude": ["node_modules", "dist"]
+}

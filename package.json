@@ -1,0 +1,36 @@
+{
+  "name": "agent-harness",
+  "version": "0.0.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "description": "Template repository for an AWS-hosted, bounded-loop coding agent. Companion to the published post on runtime vs. engineering harnesses.",
+  "engines": {
+    "node": ">=22.0.0 <23.0.0"
+  },
+  "workspaces": [
+    "modules/*",
+    "agents/*",
+    "harness/*",
+    "app/*",
+    "scripts"
+  ],
+  "scripts": {
+    "validate-config": "ts-node scripts/validate-config.ts",
+    "check-terminology": "ts-node scripts/check-terminology.ts",
+    "cdk": "npm run cdk -w @agent-harness/fanout --",
+    "test": "npm test -w @agent-harness/fanout && npm test -w @agent-harness/shared && npm test -w @agent-harness/post-deploy && npm test -w @agent-harness/editor && npm test -w @agent-harness/reviewer && npm test -w @agent-harness/loop",
+    "build": "tsc -p tsconfig.json --noEmit && npm run build -w @agent-harness/shared && npm run build -w @agent-harness/post-deploy && npm run build -w @agent-harness/editor && npm run build -w @agent-harness/reviewer && npm run build -w @agent-harness/loop"
+  },
+  "devDependencies": {
+    "@aws/agentcore": "1.0.0-preview.9",
+    "@types/jest": "29.5.12",
+    "@types/node": "20.14.10",
+    "ajv": "8.17.1",
+    "ajv-formats": "3.0.1",
+    "esbuild": "^0.28.0",
+    "jest": "29.7.0",
+    "ts-jest": "29.2.5",
+    "ts-node": "10.9.2",
+    "typescript": "5.5.3"
+  }
+}

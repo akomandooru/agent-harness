@@ -1,0 +1,29 @@
+version: 0.2
+
+env:
+  variables:
+    LOCAL_MODE: "true"
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 22
+    commands:
+      - npm ci --workspace=modules/fanout --workspace=app/codebuild --workspace=harness/loop --workspace=agents/editor --workspace=agents/reviewer
+
+  build:
+    commands:
+      - npx ts-node app/codebuild/main.ts
+
+  post_build:
+    commands:
+      - cp session-record.json $CODEBUILD_SRC_DIR/artifacts/ 2>/dev/null || true
+
+artifacts:
+  files:
+    - artifacts/session-record.json
+  discard-paths: "no"
+
+cache:
+  paths:
+    - node_modules/**/*

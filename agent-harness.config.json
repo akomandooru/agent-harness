@@ -1,0 +1,80 @@
+{
+  "module": {
+    "path": "modules/fanout",
+    "stackName": "FanoutPreview"
+  },
+  "agentcore": {
+    "regionalRouting": "us-east-1"
+  },
+  "models": {
+    "editor": "us.anthropic.claude-sonnet-4-6",
+    "reviewer": "us.anthropic.claude-sonnet-4-6"
+  },
+  "limits": {
+    "iterationCap": 8,
+    "wallClockCapMinutes": 12,
+    "tokenSpendCapUSD": 10.0
+  },
+  "sensors": {
+    "cdkNagRulePack": "AwsSolutions",
+    "reviewerSeverityThreshold": "MEDIUM",
+    "reviewerPillars": [
+      "Security",
+      "Reliability"
+    ]
+  },
+  "preview": {
+    "tagKey": "agent-harness/session",
+    "envTagKey": "agent-harness/env",
+    "sweepIntervalHours": 6,
+    "sweepMaxAgeHours": 24
+  },
+  "oscillation": {
+    "sameDiffWindow": 5,
+    "alternationWindow": 6
+  },
+  "fitnessGapLoop": {
+    "enabled": false,
+    "schedule": "0 6 * * *",
+    "autoOpen": {
+      "severityThreshold": "HIGH",
+      "duplicateAction": "comment",
+      "expiryDays": 30
+    },
+    "gapClosureChecks": {
+      "enabled": true,
+      "probes": [
+        "sns-https-only",
+        "sqs-encryption",
+        "iam-scoping"
+      ]
+    },
+    "costGuardrail": {
+      "reviewerTokenSpendCapUSD": 2.0
+    },
+    "drift": {
+      "findingCountDeltaThreshold": 5,
+      "consecutiveRunsThreshold": 3
+    }
+  },
+  "versions": {
+    "_comment": "Single source of truth for all pinned versions. The CI check scripts/check-version-drift.ts fails if these diverge from package.json lock files. Update this section when bumping any dependency.",
+    "agentcoreSdk": "1.0.0-preview.9",
+    "bedrockAgentCoreSdk": "3.1053.0",
+    "awsCdkLib": "2.257.0",
+    "awsCdk": "2.1124.1",
+    "cdkNag": "2.35.82",
+    "typescript": "5.5.3",
+    "eslint": "9.x",
+    "tsNode": "10.9.2",
+    "jest": "29.7.0",
+    "tsJest": "29.2.5",
+    "models": {
+      "editor": "us.anthropic.claude-sonnet-4-6",
+      "reviewer": "us.anthropic.claude-sonnet-4-6",
+      "_note": "Model identifiers must match the models.editor and models.reviewer fields above."
+    },
+    "bedrockRegion": "us-east-1",
+    "node": "22.x"
+  }
+}

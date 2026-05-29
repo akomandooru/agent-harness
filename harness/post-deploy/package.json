@@ -1,0 +1,46 @@
+{
+  "name": "@agent-harness/post-deploy",
+  "version": "0.0.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "description": "Synthetic post-deploy harness: drives traffic through the deployed preview environment, traces the message through SNS -> SQS, and asserts the EgressFn received it with the expected encryption properties. Returns a typed PostDeployOutput.",
+  "engines": {
+    "node": ">=22.0.0 <23.0.0"
+  },
+  "main": "src/runner.ts",
+  "types": "src/runner.ts",
+  "bin": {
+    "post-deploy": "bin/post-deploy.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json --noEmit",
+    "test": "jest"
+  },
+  "dependencies": {
+    "@agent-harness/harness-shared": "*",
+    "@aws-sdk/client-cloudwatch-logs": "3.1053.0",
+    "@aws-sdk/client-iam": "3.1053.0",
+    "@aws-sdk/client-sns": "3.1053.0",
+    "@aws-sdk/client-sqs": "3.1053.0"
+  },
+  "devDependencies": {
+    "@types/jest": "29.5.12",
+    "@types/node": "20.14.10",
+    "aws-sdk-client-mock": "4.1.0",
+    "jest": "29.7.0",
+    "ts-jest": "29.2.5",
+    "ts-node": "10.9.2",
+    "typescript": "5.5.3"
+  },
+  "jest": {
+    "preset": "ts-jest",
+    "testEnvironment": "node",
+    "testMatch": [
+      "<rootDir>/__tests__/**/*.test.ts"
+    ],
+    "collectCoverageFrom": [
+      "src/**/*.ts",
+      "bin/**/*.ts"
+    ]
+  }
+}
