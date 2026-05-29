@@ -1,0 +1,38 @@
+{
+  "name": "@agent-harness/infrastructure",
+  "version": "0.0.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "description": "CDK infrastructure stack for the agent harness IAM principals and preview-environment lifecycle.",
+  "engines": {
+    "node": ">=22.0.0 <23.0.0"
+  },
+  "scripts": {
+    "cdk": "cdk",
+    "synth": "cdk synth",
+    "test": "jest",
+    "build": "tsc --noEmit"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "2.257.0",
+    "constructs": "10.6.0"
+  },
+  "devDependencies": {
+    "@types/jest": "29.5.12",
+    "@types/node": "20.14.10",
+    "aws-cdk": "2.1124.1",
+    "cdk-nag": "2.35.82",
+    "esbuild": "^0.28.0",
+    "jest": "29.7.0",
+    "ts-jest": "29.2.5",
+    "ts-node": "10.9.2",
+    "typescript": "5.5.3"
+  },
+  "jest": {
+    "preset": "ts-jest",
+    "testEnvironment": "node",
+    "testMatch": [
+      "<rootDir>/test/**/*.test.ts"
+    ]
+  }
+}

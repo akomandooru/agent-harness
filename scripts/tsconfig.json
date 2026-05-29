@@ -1,0 +1,36 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "lib": ["ES2022"],
+    "declaration": true,
+    "inlineSourceMap": true,
+    "inlineSources": true,
+    "rootDir": "..",
+    "outDir": "dist",
+    "typeRoots": ["./node_modules/@types", "../node_modules/@types"],
+    "paths": {
+      "@agent-harness/shared": ["../agents/shared/src/wrapper.ts"],
+      "@agent-harness/post-deploy": ["../harness/post-deploy/src/runner.ts"],
+      "@agent-harness/harness-shared": ["../harness/shared/src/index.ts"],
+      "@agent-harness/reviewer": ["../agents/reviewer/agent.ts"],
+      "@agent-harness/editor": ["../agents/editor/agent.ts"],
+      "@agent-harness/loop": ["../harness/loop/src/session.ts"]
+    }
+  },
+  "include": [
+    "*.ts",
+    "__tests__/**/*.ts",
+    "../agents/editor/agent.ts",
+    "../agents/editor/tools/**/*.ts",
+    "../agents/reviewer/agent.ts",
+    "../agents/reviewer/tools.ts",
+    "../agents/reviewer/checklists/**/*.ts",
+    "../agents/shared/src/**/*.ts",
+    "../harness/post-deploy/src/**/*.ts",
+    "../harness/shared/src/**/*.ts",
+    "../harness/loop/src/**/*.ts"
+  ],
+  "exclude": ["node_modules", "dist"]
+}

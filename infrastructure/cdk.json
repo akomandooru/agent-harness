@@ -1,0 +1,7 @@
+{
+  "app": "npx ts-node app.ts",
+  "context": {
+    "editorHarnessArn": "REPLACE_WITH_EDITOR_HARNESS_ARN",
+    "reviewerHarnessArn": "REPLACE_WITH_REVIEWER_HARNESS_ARN"
+  }
+}
