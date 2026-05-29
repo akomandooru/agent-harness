@@ -1,6 +1,6 @@
 # agent-harness
 
-> Companion post: [Two harnesses every coding agent needs, and why sensors beat prompts](#) (link to come once published)
+> Companion post: [Two harnesses every coding agent needs, and why sensors beat prompts](https://builder.aws.com/content/3EPc6u9ErfkpubpgvkXZe2sGKna/two-harnesses-every-coding-agent-needs-and-why-sensors-beat-prompts) 
 
 A template for a bounded closed loop that lets an editing agent maintain a CDK module autonomously. The agent edits code, four sensors check it, a reviewer model evaluates the diff, `cdk deploy` pushes to a preview environment, and a post-deploy harness validates the live stack. The loop iterates until all gates pass or a stop condition fires. A human reviews the result.
 
