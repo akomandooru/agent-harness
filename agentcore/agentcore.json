@@ -1,9 +1,0 @@
-{
-  "project": "agent-harness",
-  "account": "${AWS_ACCOUNT_ID}",
-  "region": "${agentcore.regionalRouting}",
-  "harnesses": [
-    { "name": "editor-agent", "config": "../app/editor/harness.json" },
-    { "name": "reviewer-agent", "config": "../app/reviewer/harness.json" }
-  ]
-}
